@@ -114,9 +114,9 @@ public class ToyVpnConnection implements Runnable {
             // Now we are connected. Set the flag.
             connected = true;
             // Packets to be sent are queued in this input stream.
-            FileInputStream in = new FileInputStream(fileDescriptor.getFileDescriptor());
+            FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
             // Packets received need to be written to this output stream.
-            FileOutputStream out = new FileOutputStream(fileDescriptor.getFileDescriptor());
+            FileOutputStream outputStream = new FileOutputStream(fileDescriptor.getFileDescriptor());
             // Allocate the buffer for a single packet.
             ByteBuffer packet = ByteBuffer.allocate(MAX_PACKET_SIZE);
             // Timeouts:
@@ -129,7 +129,7 @@ public class ToyVpnConnection implements Runnable {
                 // Assume that we did not make any progress in this iteration.
                 boolean idle = true;
                 // Read the outgoing packet from the input stream.
-                int length = in.read(packet.array());
+                int length = inputStream.read(packet.array());
                 if (length > 0) {
                     // Write the outgoing packet to the tunnel.
                     packet.limit(length);
@@ -145,15 +145,14 @@ public class ToyVpnConnection implements Runnable {
                     // Ignore control messages, which start with zero.
                     if (packet.get(0) != 0) {
                         // Write the incoming packet to the output stream.
-                        out.write(packet.array(), 0, length);
+                        outputStream.write(packet.array(), 0, length);
                     }
                     packet.clear();
                     // There might be more incoming packets.
                     idle = false;
                     lastSendTime = System.currentTimeMillis();
                 }
-                // If we are idle or waiting for the network, sleep for a
-                // fraction of time to avoid busy looping.
+                // If we are idle or waiting for the network, sleep for a fraction of time to avoid busy looping.
                 if (idle) {
                     Thread.sleep(IDLE_INTERVAL_MS);
                     final long timeNow = System.currentTimeMillis();

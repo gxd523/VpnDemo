@@ -16,7 +16,6 @@ import java.net.SocketAddress;
 import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static java.nio.charset.StandardCharsets.US_ASCII;
@@ -56,33 +55,14 @@ public class ToyVpnConnection implements Runnable {
     private static final int MAX_HANDSHAKE_ATTEMPTS = 50;
     private final VpnService mService;
     private final int mConnectionId;
-    private final String mServerName;
-    private final int mServerPort;
-    private final byte[] mSharedSecret;
-    // Allowed/Disallowed packages for VPN usage
-    private final boolean mAllow;
-    private final Set<String> mPackages;
+    private final ToyVpnConfig toyVpnConfig;
     private PendingIntent mConfigureIntent;
     private OnEstablishListener mOnEstablishListener;
-    // Proxy settings
-    private String mProxyHostName;
-    private int mProxyHostPort;
 
-    public ToyVpnConnection(final VpnService service, final int connectionId, final String serverName, final int serverPort, final byte[] sharedSecret, final String proxyHostName, final int proxyHostPort, boolean allow, final Set<String> packages) {
+    public ToyVpnConnection(final VpnService service, final int connectionId, final ToyVpnConfig toyVpnConfig) {
         mService = service;
         mConnectionId = connectionId;
-        mServerName = serverName;
-        mServerPort = serverPort;
-        mSharedSecret = sharedSecret;
-        if (!TextUtils.isEmpty(proxyHostName)) {
-            mProxyHostName = proxyHostName;
-        }
-        if (proxyHostPort > 0) {
-            // The port value is always an integer due to the configured inputType.
-            mProxyHostPort = proxyHostPort;
-        }
-        mAllow = allow;
-        mPackages = packages;
+        this.toyVpnConfig = toyVpnConfig;
     }
 
     /**
@@ -104,7 +84,7 @@ public class ToyVpnConnection implements Runnable {
             // This greatly reduces the complexity of seamless handover, which
             // tries to recreate the tunnel without shutting down everything.
             // In this demo, all we need to know is the server address.
-            final SocketAddress serverAddress = new InetSocketAddress(mServerName, mServerPort);
+            final SocketAddress serverAddress = new InetSocketAddress(toyVpnConfig.serverHost, toyVpnConfig.serverPort);
             // We try to create the tunnel several times.
             // TODO: The better way is to work with ConnectivityManager, trying only when the
             // network is available.
@@ -225,7 +205,7 @@ public class ToyVpnConnection implements Runnable {
         // purposes.
         ByteBuffer packet = ByteBuffer.allocate(1024);
         // Control messages always start with zero.
-        packet.put((byte) 0).put(mSharedSecret).flip();
+        packet.put((byte) 0).put(toyVpnConfig.sharedSecret).flip();
         // Send the secret several times in case of packet loss.
         for (int i = 0; i < 3; ++i) {
             packet.position(0);
@@ -274,9 +254,9 @@ public class ToyVpnConnection implements Runnable {
         }
         // Create a new interface using the builder and save the parameters.
         final ParcelFileDescriptor vpnInterface;
-        for (String packageName : mPackages) {
+        for (String packageName : toyVpnConfig.packageSet) {
             try {
-                if (mAllow) {
+                if (toyVpnConfig.allow) {
                     builder.addAllowedApplication(packageName);
                 } else {
                     builder.addDisallowedApplication(packageName);
@@ -285,9 +265,9 @@ public class ToyVpnConnection implements Runnable {
                 Log.w(getTag(), "Package not available: " + packageName, e);
             }
         }
-        builder.setSession(mServerName).setConfigureIntent(mConfigureIntent);
-        if (!TextUtils.isEmpty(mProxyHostName)) {
-            builder.setHttpProxy(ProxyInfo.buildDirectProxy(mProxyHostName, mProxyHostPort));
+        builder.setSession(toyVpnConfig.serverHost).setConfigureIntent(mConfigureIntent);
+        if (!TextUtils.isEmpty(toyVpnConfig.proxyHost)) {
+            builder.setHttpProxy(ProxyInfo.buildDirectProxy(toyVpnConfig.proxyHost, toyVpnConfig.proxyPort));
         }
         synchronized (mService) {
             vpnInterface = builder.establish();

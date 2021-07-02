@@ -10,7 +10,7 @@
         android:icon="@android:mipmap/sym_def_app_icon"
         android:label="VpnDemo"
         android:theme="@android:style/Theme.Light.NoTitleBar.Fullscreen">
-        <activity android:name=".MainActivity">
+        <activity android:name=".toy.ToyVpnClient">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
@@ -18,6 +18,13 @@
             </intent-filter>
         </activity>
 
+        <service
+            android:name=".toy.ToyVpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
         <service
             android:name=".MyVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE">

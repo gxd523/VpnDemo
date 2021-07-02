@@ -39,7 +39,8 @@ public class ToyVpnService extends VpnService implements Handler.Callback {
             mHandler = new Handler(this);
         }
         // Create the intent to "configure" the connection (just start ToyVpnClient).
-        mConfigureIntent = PendingIntent.getActivity(this, 0, new Intent(this, ToyVpnClient.class), PendingIntent.FLAG_UPDATE_CURRENT);
+        Intent intent = new Intent(this, ToyVpnClient.class);
+        mConfigureIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
     @Override
@@ -77,11 +78,16 @@ public class ToyVpnService extends VpnService implements Handler.Callback {
         final String server = prefs.getString(ToyVpnClient.Prefs.SERVER_ADDRESS, "");
         final byte[] secret = prefs.getString(ToyVpnClient.Prefs.SHARED_SECRET, "").getBytes();
         final boolean allow = prefs.getBoolean(ToyVpnClient.Prefs.ALLOW, true);
-        final Set<String> packages = prefs.getStringSet(ToyVpnClient.Prefs.PACKAGES, Collections.emptySet());
+        final Set<String> packageSet = prefs.getStringSet(ToyVpnClient.Prefs.PACKAGES, Collections.emptySet());
         final int port = prefs.getInt(ToyVpnClient.Prefs.SERVER_PORT, 0);
         final String proxyHost = prefs.getString(ToyVpnClient.Prefs.PROXY_HOSTNAME, "");
         final int proxyPort = prefs.getInt(ToyVpnClient.Prefs.PROXY_PORT, 0);
-        startConnection(new ToyVpnConnection(this, mNextConnectionId.getAndIncrement(), server, port, secret, proxyHost, proxyPort, allow, packages));
+        ToyVpnConnection vpnConnection = new ToyVpnConnection(
+                this,
+                mNextConnectionId.getAndIncrement(),
+                new ToyVpnConfig(server, port, secret, proxyHost, proxyPort, allow, packageSet)
+        );
+        startConnection(vpnConnection);
     }
 
     private void startConnection(final ToyVpnConnection connection) {
@@ -127,8 +133,16 @@ public class ToyVpnService extends VpnService implements Handler.Callback {
     private void updateForegroundNotification(final int message) {
         final String NOTIFICATION_CHANNEL_ID = "ToyVpn";
         NotificationManager mNotificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
-        mNotificationManager.createNotificationChannel(new NotificationChannel(NOTIFICATION_CHANNEL_ID, NOTIFICATION_CHANNEL_ID, NotificationManager.IMPORTANCE_DEFAULT));
-        startForeground(1, new Notification.Builder(this, NOTIFICATION_CHANNEL_ID).setSmallIcon(R.drawable.ic_vpn).setContentText(getString(message)).setContentIntent(mConfigureIntent).build());
+        NotificationChannel notificationChannel = new NotificationChannel(
+                NOTIFICATION_CHANNEL_ID, NOTIFICATION_CHANNEL_ID, NotificationManager.IMPORTANCE_DEFAULT
+        );
+        mNotificationManager.createNotificationChannel(notificationChannel);
+        Notification notification = new Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_vpn)
+                .setContentText(getString(message))
+                .setContentIntent(mConfigureIntent)
+                .build();
+        startForeground(1, notification);
     }
 
     private static class Connection extends Pair<Thread, ParcelFileDescriptor> {

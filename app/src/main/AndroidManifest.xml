@@ -10,7 +10,7 @@
         android:icon="@android:mipmap/sym_def_app_icon"
         android:label="VpnDemo"
         android:theme="@android:style/Theme.Light.NoTitleBar.Fullscreen">
-        <activity android:name=".toy.ToyVpnClient">
+        <activity android:name=".toy.ToyVpnActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 

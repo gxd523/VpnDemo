@@ -79,12 +79,12 @@
             style="@style/item" />
 
         <Button
-            android:id="@+id/connect"
+            android:onClick="onConnectClick"
             style="@style/item"
             android:text="@string/connect" />
 
         <Button
-            android:id="@+id/disconnect"
+            android:onClick="onDisconnectClick"
             style="@style/item"
             android:text="@string/disconnect" />
     </LinearLayout>

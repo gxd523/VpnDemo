@@ -47,22 +47,21 @@ public class ToyVpnConnection implements Runnable {
      */
     private static final long IDLE_INTERVAL_MS = TimeUnit.MILLISECONDS.toMillis(100);
     /**
-     * Number of periods of length {@IDLE_INTERVAL_MS} to wait before declaring the handshake a
-     * complete and abject failure.
+     * Number of periods of length {@link IDLE_INTERVAL_MS} to wait before declaring the handshake a complete and abject failure.
      * <p>
      * TODO: use a higher-level protocol; hand-rolling is a fun but pointless exercise.
      */
     private static final int MAX_HANDSHAKE_ATTEMPTS = 50;
-    private final VpnService mService;
+    private final VpnService mVpnService;
     private final int mConnectionId;
-    private final ToyVpnConfig toyVpnConfig;
+    private final ToyVpnConfig mToyVpnConfig;
     private PendingIntent mConfigureIntent;
     private OnEstablishListener mOnEstablishListener;
 
     public ToyVpnConnection(final VpnService service, final int connectionId, final ToyVpnConfig toyVpnConfig) {
-        mService = service;
+        mVpnService = service;
         mConnectionId = connectionId;
-        this.toyVpnConfig = toyVpnConfig;
+        this.mToyVpnConfig = toyVpnConfig;
     }
 
     /**
@@ -81,21 +80,17 @@ public class ToyVpnConnection implements Runnable {
         try {
             Log.i(getTag(), "Starting");
             // If anything needs to be obtained using the network, get it now.
-            // This greatly reduces the complexity of seamless handover, which
-            // tries to recreate the tunnel without shutting down everything.
+            // This greatly reduces the complexity of seamless handover, which tries to recreate the tunnel without shutting down everything.
             // In this demo, all we need to know is the server address.
-            final SocketAddress serverAddress = new InetSocketAddress(toyVpnConfig.serverHost, toyVpnConfig.serverPort);
+            final SocketAddress serverAddress = new InetSocketAddress(mToyVpnConfig.serverHost, mToyVpnConfig.serverPort);
             // We try to create the tunnel several times.
-            // TODO: The better way is to work with ConnectivityManager, trying only when the
-            // network is available.
+            // TODO: The better way is to work with ConnectivityManager, trying only when the network is available.
             // Here we just use a counter to keep things simple.
             for (int attempt = 0; attempt < 10; ++attempt) {
-                // Reset the counter if we were connected.
-                if (run(serverAddress)) {
+                if (run(serverAddress)) {// Reset the counter if we were connected.
                     attempt = 0;
                 }
-                // Sleep for a while. This also checks if we got interrupted.
-                Thread.sleep(3000);
+                Thread.sleep(3000);// Sleep for a while. This also checks if we got interrupted.
             }
             Log.i(getTag(), "Giving up");
         } catch (IOException | InterruptedException | IllegalArgumentException e) {
@@ -104,27 +99,24 @@ public class ToyVpnConnection implements Runnable {
     }
 
     private boolean run(SocketAddress server) throws IOException, InterruptedException, IllegalArgumentException {
-        ParcelFileDescriptor iface = null;
+        ParcelFileDescriptor fileDescriptor = null;
         boolean connected = false;
-        // Create a DatagramChannel as the VPN tunnel.
-        try (DatagramChannel tunnel = DatagramChannel.open()) {
-            // Protect the tunnel before connecting to avoid loopback.
-            if (!mService.protect(tunnel.socket())) {
+        try (DatagramChannel tunnel = DatagramChannel.open()) {// 第二步: Create a DatagramChannel as the VPN tunnel.
+            if (!mVpnService.protect(tunnel.socket())) {// Protect the tunnel before connecting to avoid loopback.
                 throw new IllegalStateException("Cannot protect the tunnel");
             }
-            // Connect to the server.
-            tunnel.connect(server);
-            // For simplicity, we use the same thread for both reading and
-            // writing. Here we put the tunnel into non-blocking mode.
+            tunnel.connect(server);// 第三步: Connect to the server.
+            // For simplicity, we use the same thread for both reading and writing.
+            // Here we put the tunnel into non-blocking mode.
             tunnel.configureBlocking(false);
             // Authenticate and configure the virtual network interface.
-            iface = handshake(tunnel);
+            fileDescriptor = handshake(tunnel);
             // Now we are connected. Set the flag.
             connected = true;
             // Packets to be sent are queued in this input stream.
-            FileInputStream in = new FileInputStream(iface.getFileDescriptor());
+            FileInputStream in = new FileInputStream(fileDescriptor.getFileDescriptor());
             // Packets received need to be written to this output stream.
-            FileOutputStream out = new FileOutputStream(iface.getFileDescriptor());
+            FileOutputStream out = new FileOutputStream(fileDescriptor.getFileDescriptor());
             // Allocate the buffer for a single packet.
             ByteBuffer packet = ByteBuffer.allocate(MAX_PACKET_SIZE);
             // Timeouts:
@@ -184,9 +176,9 @@ public class ToyVpnConnection implements Runnable {
         } catch (SocketException e) {
             Log.e(getTag(), "Cannot use socket", e);
         } finally {
-            if (iface != null) {
+            if (fileDescriptor != null) {
                 try {
-                    iface.close();
+                    fileDescriptor.close();
                 } catch (IOException e) {
                     Log.e(getTag(), "Unable to close interface", e);
                 }
@@ -196,38 +188,34 @@ public class ToyVpnConnection implements Runnable {
     }
 
     private ParcelFileDescriptor handshake(DatagramChannel tunnel) throws IOException, InterruptedException {
-        // To build a secured tunnel, we should perform mutual authentication
-        // and exchange session keys for encryption. To keep things simple in
-        // this demo, we just send the shared secret in plaintext and wait
-        // for the server to send the parameters.
-        // Allocate the buffer for handshaking. We have a hardcoded maximum
-        // handshake size of 1024 bytes, which should be enough for demo
-        // purposes.
+        // To build a secured tunnel, we should perform mutual authentication and exchange session keys for encryption.
+        // To keep things simple in this demo, we just send the shared secret in plaintext and wait for the server to send the parameters.
+        // Allocate the buffer for handshaking.
+        // We have a hardcoded maximum handshake size of 1024 bytes, which should be enough for demo purposes.
         ByteBuffer packet = ByteBuffer.allocate(1024);
         // Control messages always start with zero.
-        packet.put((byte) 0).put(toyVpnConfig.sharedSecret).flip();
-        // Send the secret several times in case of packet loss.
-        for (int i = 0; i < 3; ++i) {
+        packet.put((byte) 0).put(mToyVpnConfig.sharedSecret).flip();// TODO: 2021/7/2 flip()?
+
+        for (int i = 0; i < 3; ++i) {// Send the secret several times in case of packet loss.
             packet.position(0);
             tunnel.write(packet);
         }
         packet.clear();
-        // Wait for the parameters within a limited time.
-        for (int i = 0; i < MAX_HANDSHAKE_ATTEMPTS; ++i) {
+
+        for (int i = 0; i < MAX_HANDSHAKE_ATTEMPTS; ++i) {// Wait for the parameters within a limited time.
             Thread.sleep(IDLE_INTERVAL_MS);
-            // Normally we should not receive random packets. Check that the first
-            // byte is 0 as expected.
+            // Normally we should not receive random packets. Check that the first byte is 0 as expected.
             int length = tunnel.read(packet);
             if (length > 0 && packet.get(0) == 0) {
-                return configure(new String(packet.array(), 1, length - 1, US_ASCII).trim());
+                String trim = new String(packet.array(), 1, length - 1, US_ASCII).trim();
+                return configure(trim);
             }
         }
         throw new IOException("Timed out");
     }
 
     private ParcelFileDescriptor configure(String parameters) throws IllegalArgumentException {
-        // Configure a builder while parsing the parameters.
-        VpnService.Builder builder = mService.new Builder();
+        VpnService.Builder builder = mVpnService.new Builder();// Configure a builder while parsing the parameters.
         for (String parameter : parameters.split(" ")) {
             String[] fields = parameter.split(",");
             try {
@@ -252,11 +240,11 @@ public class ToyVpnConnection implements Runnable {
                 throw new IllegalArgumentException("Bad parameter: " + parameter);
             }
         }
-        // Create a new interface using the builder and save the parameters.
-        final ParcelFileDescriptor vpnInterface;
-        for (String packageName : toyVpnConfig.packageSet) {
+
+        final ParcelFileDescriptor fileDescriptor;// Create a new interface using the builder and save the parameters.
+        for (String packageName : mToyVpnConfig.packageSet) {
             try {
-                if (toyVpnConfig.allow) {
+                if (mToyVpnConfig.allow) {
                     builder.addAllowedApplication(packageName);
                 } else {
                     builder.addDisallowedApplication(packageName);
@@ -265,18 +253,18 @@ public class ToyVpnConnection implements Runnable {
                 Log.w(getTag(), "Package not available: " + packageName, e);
             }
         }
-        builder.setSession(toyVpnConfig.serverHost).setConfigureIntent(mConfigureIntent);
-        if (!TextUtils.isEmpty(toyVpnConfig.proxyHost)) {
-            builder.setHttpProxy(ProxyInfo.buildDirectProxy(toyVpnConfig.proxyHost, toyVpnConfig.proxyPort));
+        builder.setSession(mToyVpnConfig.serverHost).setConfigureIntent(mConfigureIntent);
+        if (!TextUtils.isEmpty(mToyVpnConfig.proxyHost)) {
+            builder.setHttpProxy(ProxyInfo.buildDirectProxy(mToyVpnConfig.proxyHost, mToyVpnConfig.proxyPort));
         }
-        synchronized (mService) {
-            vpnInterface = builder.establish();
+        synchronized (mVpnService) {
+            fileDescriptor = builder.establish();
             if (mOnEstablishListener != null) {
-                mOnEstablishListener.onEstablish(vpnInterface);
+                mOnEstablishListener.onEstablish(fileDescriptor);
             }
         }
-        Log.i(getTag(), "New interface: " + vpnInterface + " (" + parameters + ")");
-        return vpnInterface;
+        Log.i(getTag(), "New interface: " + fileDescriptor + " (" + parameters + ")");
+        return fileDescriptor;
     }
 
     private String getTag() {
@@ -288,6 +276,6 @@ public class ToyVpnConnection implements Runnable {
      * and update the foreground notification with connection status.
      */
     public interface OnEstablishListener {
-        void onEstablish(ParcelFileDescriptor tunInterface);
+        void onEstablish(ParcelFileDescriptor fileDescriptor);
     }
 }

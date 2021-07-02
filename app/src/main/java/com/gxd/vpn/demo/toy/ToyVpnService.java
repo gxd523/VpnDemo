@@ -27,7 +27,7 @@ public class ToyVpnService extends VpnService implements Handler.Callback {
     public static final String ACTION_DISCONNECT = "com.example.android.toyvpn.STOP";
     private static final String TAG = ToyVpnService.class.getSimpleName();
     private final AtomicReference<Thread> mConnectingThread = new AtomicReference<>();
-    private final AtomicReference<Connection> mConnection = new AtomicReference<>();
+    private final AtomicReference<ConnectionPair> mConnection = new AtomicReference<>();
     private final AtomicInteger mNextConnectionId = new AtomicInteger(1);
     private Handler mHandler;
     private PendingIntent mConfigureIntent;
@@ -39,7 +39,7 @@ public class ToyVpnService extends VpnService implements Handler.Callback {
             mHandler = new Handler(this);
         }
         // Create the intent to "configure" the connection (just start ToyVpnClient).
-        Intent intent = new Intent(this, ToyVpnClient.class);
+        Intent intent = new Intent(this, ToyVpnActivity.class);
         mConfigureIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT);
     }
 
@@ -69,23 +69,24 @@ public class ToyVpnService extends VpnService implements Handler.Callback {
     }
 
     private void connect() {
-        // Become a foreground service. Background services can be VPN services too, but they can
-        // be killed by background check before getting a chance to receive onRevoke().
+        // Become a foreground service. Background services can be VPN services too,
+        // but they can be killed by background check before getting a chance to receive onRevoke().
         updateForegroundNotification(R.string.connecting);
         mHandler.sendEmptyMessage(R.string.connecting);
         // Extract information from the shared preferences.
-        final SharedPreferences prefs = getSharedPreferences(ToyVpnClient.Prefs.NAME, MODE_PRIVATE);
-        final String server = prefs.getString(ToyVpnClient.Prefs.SERVER_ADDRESS, "");
-        final byte[] secret = prefs.getString(ToyVpnClient.Prefs.SHARED_SECRET, "").getBytes();
-        final boolean allow = prefs.getBoolean(ToyVpnClient.Prefs.ALLOW, true);
-        final Set<String> packageSet = prefs.getStringSet(ToyVpnClient.Prefs.PACKAGES, Collections.emptySet());
-        final int port = prefs.getInt(ToyVpnClient.Prefs.SERVER_PORT, 0);
-        final String proxyHost = prefs.getString(ToyVpnClient.Prefs.PROXY_HOSTNAME, "");
-        final int proxyPort = prefs.getInt(ToyVpnClient.Prefs.PROXY_PORT, 0);
+        final SharedPreferences sp = getSharedPreferences(SpConst.SP_NAME, MODE_PRIVATE);
+        final String serverHost = sp.getString(SpConst.SERVER_HOST, "");
+        final byte[] sharedSecret = sp.getString(SpConst.SHARED_SECRET, "").getBytes();
+        final boolean allow = sp.getBoolean(SpConst.ALLOW, true);
+        final Set<String> packageSet = sp.getStringSet(SpConst.PACKAGES, Collections.emptySet());
+        final int serverPort = sp.getInt(SpConst.SERVER_PORT, 0);
+        final String proxyHost = sp.getString(SpConst.PROXY_HOST, "");
+        final int proxyPort = sp.getInt(SpConst.PROXY_PORT, 0);
+
         ToyVpnConnection vpnConnection = new ToyVpnConnection(
                 this,
                 mNextConnectionId.getAndIncrement(),
-                new ToyVpnConfig(server, port, secret, proxyHost, proxyPort, allow, packageSet)
+                new ToyVpnConfig(serverHost, serverPort, sharedSecret, proxyHost, proxyPort, allow, packageSet)
         );
         startConnection(vpnConnection);
     }
@@ -99,27 +100,29 @@ public class ToyVpnService extends VpnService implements Handler.Callback {
         connection.setOnEstablishListener(tunInterface -> {
             mHandler.sendEmptyMessage(R.string.connected);
             mConnectingThread.compareAndSet(thread, null);
-            setConnection(new Connection(thread, tunInterface));
+            setConnection(new ConnectionPair(thread, tunInterface));
         });
         thread.start();
     }
 
     private void setConnectingThread(final Thread thread) {
         final Thread oldThread = mConnectingThread.getAndSet(thread);
-        if (oldThread != null) {
-            oldThread.interrupt();
+        if (oldThread == null) {
+            return;
         }
+        oldThread.interrupt();
     }
 
-    private void setConnection(final Connection connection) {
-        final Connection oldConnection = mConnection.getAndSet(connection);
-        if (oldConnection != null) {
-            try {
-                oldConnection.first.interrupt();
-                oldConnection.second.close();
-            } catch (IOException e) {
-                Log.e(TAG, "Closing VPN interface", e);
-            }
+    private void setConnection(final ConnectionPair connectionPair) {
+        final ConnectionPair oldConnectionPair = mConnection.getAndSet(connectionPair);
+        if (oldConnectionPair == null) {
+            return;
+        }
+        try {
+            oldConnectionPair.first.interrupt();
+            oldConnectionPair.second.close();
+        } catch (IOException e) {
+            Log.e(TAG, "Closing VPN interface", e);
         }
     }
 
@@ -145,8 +148,8 @@ public class ToyVpnService extends VpnService implements Handler.Callback {
         startForeground(1, notification);
     }
 
-    private static class Connection extends Pair<Thread, ParcelFileDescriptor> {
-        public Connection(Thread thread, ParcelFileDescriptor pfd) {
+    private static class ConnectionPair extends Pair<Thread, ParcelFileDescriptor> {
+        public ConnectionPair(Thread thread, ParcelFileDescriptor pfd) {
             super(thread, pfd);
         }
     }

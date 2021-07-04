@@ -90,7 +90,7 @@ public class ToyVpnActivity extends Activity {
                 .putStringSet(SpConst.PACKAGES, packageSet)
                 .apply();
 
-        Intent intent = VpnService.prepare(ToyVpnActivity.this);
+        Intent intent = VpnService.prepare(ToyVpnActivity.this);// 第一步：询问权限
         if (intent != null) {
             startActivityForResult(intent, 0);
         } else {

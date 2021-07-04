@@ -101,11 +101,11 @@ public class ToyVpnConnection implements Runnable {
     private boolean run(SocketAddress server) throws IOException, InterruptedException, IllegalArgumentException {
         ParcelFileDescriptor fileDescriptor = null;
         boolean connected = false;
-        try (DatagramChannel tunnel = DatagramChannel.open()) {// 第二步: Create a DatagramChannel as the VPN tunnel.
-            if (!mVpnService.protect(tunnel.socket())) {// Protect the tunnel before connecting to avoid loopback.
+        try (DatagramChannel tunnel = DatagramChannel.open()) {// Create a DatagramChannel as the VPN tunnel.
+            if (!mVpnService.protect(tunnel.socket())) {// 第二步: Protect the tunnel before connecting to avoid loopback.
                 throw new IllegalStateException("Cannot protect the tunnel");
             }
-            tunnel.connect(server);// 第三步: Connect to the server.
+            tunnel.connect(server);// 第三步: Connect to the server. 隧道套接字连接到 VPN 网关
             // For simplicity, we use the same thread for both reading and writing.
             // Here we put the tunnel into non-blocking mode.
             tunnel.configureBlocking(false);
@@ -113,7 +113,7 @@ public class ToyVpnConnection implements Runnable {
             fileDescriptor = handshake(tunnel);
             // Now we are connected. Set the flag.
             connected = true;
-            // Packets to be sent are queued in this input stream.
+            // Packets to be sent are queued in this input stream. 别的app的数据包进入我们的VPN app，加密后由隧道套接字发送出去
             FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
             // Packets received need to be written to this output stream.
             FileOutputStream outputStream = new FileOutputStream(fileDescriptor.getFileDescriptor());
@@ -193,7 +193,7 @@ public class ToyVpnConnection implements Runnable {
         // We have a hardcoded maximum handshake size of 1024 bytes, which should be enough for demo purposes.
         ByteBuffer packet = ByteBuffer.allocate(1024);
         // Control messages always start with zero.
-        packet.put((byte) 0).put(mToyVpnConfig.sharedSecret).flip();// TODO: 2021/7/2 flip()?
+        packet.put((byte) 0).put(mToyVpnConfig.sharedSecret).flip();// 切换读/写模式
 
         for (int i = 0; i < 3; ++i) {// Send the secret several times in case of packet loss.
             packet.position(0);
@@ -213,26 +213,34 @@ public class ToyVpnConnection implements Runnable {
         throw new IOException("Timed out");
     }
 
+    /**
+     * 第四步：为 VPN 流量配置新的本地 TUN 接口
+     * @param parameters 从隧道接口(DatagramChannel)读到的数据
+     */
     private ParcelFileDescriptor configure(String parameters) throws IllegalArgumentException {
-        VpnService.Builder builder = mVpnService.new Builder();// Configure a builder while parsing the parameters.
+        VpnService.Builder localTunnel = mVpnService.new Builder();// Configure a localTunnel while parsing the parameters.
         for (String parameter : parameters.split(" ")) {
             String[] fields = parameter.split(",");
             try {
                 switch (fields[0].charAt(0)) {
                     case 'm':
-                        builder.setMtu(Short.parseShort(fields[1]));
+                        localTunnel.setMtu(Short.parseShort(fields[1]));
                         break;
                     case 'a':
-                        builder.addAddress(fields[1], Integer.parseInt(fields[2]));
+                        // 添加至少一个 IPv4 或 IPv6 地址以及系统指定为本地 TUN 接口地址的子网掩码。
+                        // 您的应用通常会在握手过程中收到来自 VPN 网关的 IP 地址和子网掩码。
+                        localTunnel.addAddress(fields[1], Integer.parseInt(fields[2]));
                         break;
                     case 'r':
-                        builder.addRoute(fields[1], Integer.parseInt(fields[2]));
+                        // 如果您希望系统通过 VPN 接口发送流量，请至少添加一个路由。
+                        // 路由按目标地址过滤。要接受所有流量，请设置开放路由，例如 0.0.0.0/0 或 ::/0
+                        localTunnel.addRoute(fields[1], Integer.parseInt(fields[2]));
                         break;
                     case 'd':
-                        builder.addDnsServer(fields[1]);
+                        localTunnel.addDnsServer(fields[1]);
                         break;
                     case 's':
-                        builder.addSearchDomain(fields[1]);
+                        localTunnel.addSearchDomain(fields[1]);
                         break;
                 }
             } catch (NumberFormatException e) {
@@ -240,24 +248,24 @@ public class ToyVpnConnection implements Runnable {
             }
         }
 
-        final ParcelFileDescriptor fileDescriptor;// Create a new interface using the builder and save the parameters.
+        final ParcelFileDescriptor fileDescriptor;// Create a new interface using the localTunnel and save the parameters.
         for (String packageName : mToyVpnConfig.packageSet) {
             try {
                 if (mToyVpnConfig.allow) {
-                    builder.addAllowedApplication(packageName);
+                    localTunnel.addAllowedApplication(packageName);
                 } else {
-                    builder.addDisallowedApplication(packageName);
+                    localTunnel.addDisallowedApplication(packageName);
                 }
             } catch (PackageManager.NameNotFoundException e) {
                 Log.w(getTag(), "Package not available: " + packageName, e);
             }
         }
-        builder.setSession(mToyVpnConfig.serverHost).setConfigureIntent(mConfigureIntent);
+        localTunnel.setSession(mToyVpnConfig.serverHost).setConfigureIntent(mConfigureIntent);
         if (!TextUtils.isEmpty(mToyVpnConfig.proxyHost)) {
-            builder.setHttpProxy(ProxyInfo.buildDirectProxy(mToyVpnConfig.proxyHost, mToyVpnConfig.proxyPort));
+            localTunnel.setHttpProxy(ProxyInfo.buildDirectProxy(mToyVpnConfig.proxyHost, mToyVpnConfig.proxyPort));
         }
         synchronized (mVpnService) {
-            fileDescriptor = builder.establish();
+            fileDescriptor = localTunnel.establish();// 系统建立本地 TUN 接口并开始通过该接口传送流量
             if (mOnEstablishListener != null) {
                 mOnEstablishListener.onEstablish(fileDescriptor);
             }
